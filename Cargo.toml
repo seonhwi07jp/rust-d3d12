@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 bindings = {path = "bindings"}
 windows = "0.10.0"
+utf16_literal = "0.2.1"
