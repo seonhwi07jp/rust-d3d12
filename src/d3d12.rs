@@ -15,6 +15,9 @@ use windows::*;
 
 pub struct Resources {
     hwnd: HWND,
+    factory: IDXGIFactory,
+    adapter: IDXGIAdapter,
+    device: ID3D12Device,
 }
 
 pub struct BareBoneGame {
@@ -34,6 +37,9 @@ impl BareBoneGame {
         };
 
         let hwnd = ret.create_window()?;
+        let factory = ret.create_factory()?;
+        let adapter = ret.create_adapter(&factory)?;
+        let device = ret.create_device(&adapter)?;
 
         unsafe { ShowWindow(hwnd, SW_SHOW) };
 
@@ -51,6 +57,13 @@ impl BareBoneGame {
                 }
             }
         }
+
+        ret.resources = Some(Resources {
+            hwnd,
+            factory,
+            adapter,
+            device,
+        });
 
         Ok(ret)
     }
@@ -107,5 +120,60 @@ impl BareBoneGame {
         }
 
         DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    // factory를 생성한다
+    fn create_factory(&self) -> Result<IDXGIFactory> {
+        let factory = unsafe { CreateDXGIFactory() }?;
+
+        Ok(factory)
+    }
+
+    // DirectX12를 지원하는 처음 adapter를 반환한다.
+    fn create_adapter(&self, factory: &IDXGIFactory) -> Result<IDXGIAdapter> {
+        // 루프를 돌면서 D3D_FEATURE_LEVEL_12_1을 지원하는
+        // 어댑터가 있는지 확인한다.
+        for i in 0.. {
+            let mut adapter = None;
+            let adapter = unsafe { factory.EnumAdapters(i, &mut adapter) }
+                .and_some(adapter)
+                .unwrap();
+
+            // windows 크레이트에서 제공하는 D3D12CreateDevice 함수는
+            // adapter의 지원여부만을 확인하는 방법을 제공하지 않기 때문에
+            // d3d12.lib에서 직접 D3D12CreateDevice 함수를 가져온다.
+            #[link(name = "d3d12")]
+            #[allow(dead_code)]
+            extern "system" {
+                pub fn D3D12CreateDevice(
+                    pdapter: windows::RawPtr,
+                    minimutfeaturelevel: D3D_FEATURE_LEVEL,
+                    riid: *const windows::Guid,
+                    ppdevice: *mut *mut std::ffi::c_void,
+                ) -> windows::HRESULT;
+            }
+
+            if unsafe {
+                D3D12CreateDevice(
+                    adapter.abi(),
+                    D3D_FEATURE_LEVEL_12_1,
+                    &ID3D12Device::IID,
+                    std::ptr::null_mut(),
+                )
+            }
+            .is_ok()
+            {
+                return Ok(adapter);
+            }
+        }
+
+        unreachable!()
+    }
+
+    // device를 생성한다.
+    fn create_device(&self, adapter: &IDXGIAdapter) -> Result<ID3D12Device> {
+        let device = unsafe { D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_1) }?;
+
+        Ok(device)
     }
 }
