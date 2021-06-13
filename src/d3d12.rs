@@ -40,6 +40,10 @@ impl BareBoneGame {
         let factory = ret.create_factory()?;
         let adapter = ret.create_adapter(&factory)?;
         let device = ret.create_device(&adapter)?;
+        let command_queue = ret.create_command_queue(&device)?;
+        let command_allocator = ret.create_command_allocator(&device);
+        let (swap_chain, frame_index) =
+            ret.create_swap_chain(2, &hwnd, &factory, &command_queue)?;
 
         unsafe { ShowWindow(hwnd, SW_SHOW) };
 
@@ -175,5 +179,70 @@ impl BareBoneGame {
         let device = unsafe { D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_1) }?;
 
         Ok(device)
+    }
+
+    // 커맨드 큐를 생성한다
+    fn create_command_queue(&self, device: &ID3D12Device) -> Result<ID3D12CommandQueue> {
+        let command_queue = unsafe {
+            device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
+                Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
+                ..Default::default()
+            })
+        }?;
+
+        Ok(command_queue)
+    }
+
+    // 커맨드 할당자를 생성한다
+    fn create_command_allocator(&self, device: &ID3D12Device) -> Result<ID3D12CommandAllocator> {
+        let command_allocator =
+            unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }?;
+
+        Ok(command_allocator)
+    }
+
+    // 스왑 체인을 생성한다
+    fn create_swap_chain(
+        &self,
+        buffer_count: u32,
+        hwnd: &HWND,
+        factory: &IDXGIFactory,
+        command_queue: &ID3D12CommandQueue,
+    ) -> Result<(IDXGISwapChain, u32)> {
+        // IDXGIFactorty2::CreateSwapChainForHwnd 함수를 호출하기 위한 캐스팅
+        let factory: IDXGIFactory2 = factory.cast()?;
+
+        let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
+            BufferCount: buffer_count,
+            Width: self.width,
+            Height: self.height,
+            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+            BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut swap_chain = None;
+        let swap_chain: IDXGISwapChain3 = unsafe {
+            factory.CreateSwapChainForHwnd(
+                command_queue,
+                hwnd,
+                &swap_chain_desc,
+                std::ptr::null(),
+                None,
+                &mut swap_chain,
+            )
+        }
+        .and_some(swap_chain)?
+        // IDXGISwapChain3::GetCurrentBackBufferIndex를 호출하기 위한 캐스팅
+        .cast()?;
+
+        let frame_index = unsafe { swap_chain.GetCurrentBackBufferIndex() };
+
+        Ok((swap_chain.cast()?, frame_index))
     }
 }
