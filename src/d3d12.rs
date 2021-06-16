@@ -41,9 +41,12 @@ impl BareBoneGame {
         let adapter = ret.create_adapter(&factory)?;
         let device = ret.create_device(&adapter)?;
         let command_queue = ret.create_command_queue(&device)?;
-        let command_allocator = ret.create_command_allocator(&device);
+        let command_allocator = ret.create_command_allocator(&device)?;
         let (swap_chain, frame_index) =
             ret.create_swap_chain(2, &hwnd, &factory, &command_queue)?;
+        let (rtv_heap, rtv_desc_size) = ret.create_rtv_heap(2, &device)?;
+        let render_targets =
+            ret.create_render_target(2, rtv_desc_size, &device, &swap_chain, &rtv_heap);
 
         unsafe { ShowWindow(hwnd, SW_SHOW) };
 
@@ -244,5 +247,56 @@ impl BareBoneGame {
         let frame_index = unsafe { swap_chain.GetCurrentBackBufferIndex() };
 
         Ok((swap_chain.cast()?, frame_index))
+    }
+
+    // RTV Heap을 생성합니다.
+    fn create_rtv_heap(
+        &self,
+        buffer_count: u32,
+        device: &ID3D12Device,
+    ) -> Result<(ID3D12DescriptorHeap, u32)> {
+        let rtv_heap: ID3D12DescriptorHeap = unsafe {
+            device.CreateDescriptorHeap(&D3D12_DESCRIPTOR_HEAP_DESC {
+                NumDescriptors: buffer_count,
+                Type: D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                ..Default::default()
+            })
+        }?;
+
+        let rtv_desc_size =
+            unsafe { device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV) };
+
+        Ok((rtv_heap, rtv_desc_size))
+    }
+
+    fn create_render_target(
+        &self,
+        buffer_count: u32,
+        rtv_desc_size: u32,
+        device: &ID3D12Device,
+        swap_chain: &IDXGISwapChain,
+        rtv_heap: &ID3D12DescriptorHeap,
+    ) -> Result<Vec<ID3D12Resource>> {
+        let rtv_handle = unsafe { rtv_heap.GetCPUDescriptorHandleForHeapStart() };
+
+        let mut render_targets = Vec::new();
+
+        for i in 0..buffer_count {
+            let render_target: ID3D12Resource = unsafe { swap_chain.GetBuffer(i) }?;
+
+            unsafe {
+                device.CreateRenderTargetView(
+                    &render_target,
+                    std::ptr::null(),
+                    &D3D12_CPU_DESCRIPTOR_HANDLE {
+                        ptr: rtv_handle.ptr + (rtv_desc_size * i) as usize,
+                    },
+                )
+            }
+
+            render_targets.push(render_target);
+        }
+
+        Ok(render_targets)
     }
 }
